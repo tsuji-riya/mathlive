@@ -6548,7 +6548,8 @@ source is put on the clipboard. When copied with some surrounding text, each
 `<math-span>` is replaced with its LaTeX source wrapped in `$...$` and each
 `<math-div>` with its LaTeX source wrapped in `$$...$$`, and the styles that
 the surrounding text gets from the style sheets of the page are not
-included in the copied HTML. A partially selected element is copied in full. If the selection includes a `<math-field>`, the default copy
+included in the copied HTML. A partially selected element is copied in
+full. If the selection includes a `<math-field>`, the default copy
 behavior is used.
 
  render - Fired when content is successfully rendered

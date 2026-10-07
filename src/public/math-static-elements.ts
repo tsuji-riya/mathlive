@@ -56,43 +56,25 @@ function convertContentToLatex(
 }
 
 /**
- * The LaTeX of the static elements, so that it is not converted again on
- * each copy
- */
-const gLatexCache = new WeakMap<
-  MathStaticElement,
-  { content: string; format: StaticElementFormat; latex: string }
->();
-
-/**
  * The LaTeX source of a static element, as put on the clipboard. If the
  * content cannot be converted (e.g. invalid MathJSON, or MathJSON without the
  * Compute Engine), it is returned as is.
  */
 function getElementLatex(element: MathStaticElement): string {
   const content = element.textContent?.trim() ?? '';
-  const format = element.format;
-  const cached = gLatexCache.get(element);
-  if (cached?.content === content && cached.format === format)
-    return cached.latex;
-
-  let latex: string;
   try {
-    latex = convertContentToLatex(content, format) || content;
+    return convertContentToLatex(content, element.format) || content;
   } catch {
-    latex = content;
+    return content;
   }
-  gLatexCache.set(element, { content, format, latex });
-  return latex;
 }
 
 /**
  * The `copy` event is dispatched to the focused element (or the body), not to
- * the elements in the selection, so a single listener is installed on the
- * document while it contains at least one connected static element.
+ * the elements in the selection, so a listener is installed on the document
+ * of each connected static element (adding the same listener again is a
+ * no-op).
  */
-const gConnectedElements = new Map<Document, Set<MathStaticElement>>();
-
 function onDocumentCopy(event: ClipboardEvent): void {
   if (event.defaultPrevented || !event.clipboardData) return;
 
@@ -109,11 +91,13 @@ function onDocumentCopy(event: ClipboardEvent): void {
   )
     return;
 
+  // Static elements inside another shadow tree cannot be in a selection of
+  // the document tree, so the elements of the document are enough
   const doc = event.currentTarget as Document;
-  const elements = gConnectedElements.get(doc);
-  if (!elements) return;
+  const elements = [...doc.querySelectorAll('math-span, math-div')];
+  if (elements.length === 0) return;
 
-  const data = getStaticCopyData(doc, [...elements], (element) => ({
+  const data = getStaticCopyData(doc, elements, (element) => ({
     latex: getElementLatex(element as MathStaticElement),
     display: element instanceof MathDivElement,
   }));
@@ -123,27 +107,6 @@ function onDocumentCopy(event: ClipboardEvent): void {
   if (data.html !== undefined)
     event.clipboardData.setData('text/html', data.html);
   event.preventDefault();
-}
-
-function registerElement(element: MathStaticElement): void {
-  const doc = element.ownerDocument;
-  let elements = gConnectedElements.get(doc);
-  if (!elements) {
-    elements = new Set();
-    gConnectedElements.set(doc, elements);
-    doc.addEventListener('copy', onDocumentCopy);
-  }
-  elements.add(element);
-}
-
-function unregisterElement(element: MathStaticElement): void {
-  const doc = element.ownerDocument;
-  const elements = gConnectedElements.get(doc);
-  if (!elements) return;
-  elements.delete(element);
-  if (elements.size > 0) return;
-  doc.removeEventListener('copy', onDocumentCopy);
-  gConnectedElements.delete(doc);
 }
 
 /**
@@ -225,7 +188,7 @@ abstract class MathStaticElement extends HTMLElement {
     // Lazy load fonts globally (performance optimization)
     ensureFontsLoaded();
 
-    registerElement(this);
+    this.ownerDocument.addEventListener('copy', onDocumentCopy);
 
     // Use Intersection Observer for deferred rendering (performance optimization)
     if ('IntersectionObserver' in window && !this._hasRendered) {
@@ -248,7 +211,6 @@ abstract class MathStaticElement extends HTMLElement {
 
   disconnectedCallback(): void {
     this._observer?.disconnect();
-    unregisterElement(this);
   }
 
   attributeChangedCallback(
@@ -400,9 +362,7 @@ abstract class MathStaticElement extends HTMLElement {
       this._contentSlot.textContent = content;
 
       // Convert content based on format
-      const format = this.format;
-      const latex = convertContentToLatex(content, format);
-      gLatexCache.set(this, { content, format, latex: latex || content });
+      const latex = convertContentToLatex(content, this.format);
 
       // Build render options
       const options: Partial<LayoutOptions> = {
@@ -444,7 +404,7 @@ abstract class MathStaticElement extends HTMLElement {
         new CustomEvent('render', {
           bubbles: true,
           composed: true,
-          detail: { format, content: latex },
+          detail: { format: this.format, content: latex },
         })
       );
     } catch (error) {
@@ -550,7 +510,8 @@ abstract class MathStaticElement extends HTMLElement {
  * `<math-span>` is replaced with its LaTeX source wrapped in `$...$` and each
  * `<math-div>` with its LaTeX source wrapped in `$$...$$`, and the styles that
  * the surrounding text gets from the style sheets of the page are not
- * included in the copied HTML. A partially selected element is copied in full. If the selection includes a `<math-field>`, the default copy
+ * included in the copied HTML. A partially selected element is copied in
+ * full. If the selection includes a `<math-field>`, the default copy
  * behavior is used.
  *
  * @event render - Fired when content is successfully rendered
