@@ -7,6 +7,12 @@ import { latexCommand } from '../core/tokenizer';
 import { getDefinition } from '../latex-commands/definitions-utils';
 import { X_HEIGHT, AXIS_HEIGHT } from '../core/font-metrics';
 import type { AtomJson, ToLatexOptions } from 'core/types';
+import {
+  validateCssBorder,
+  validateCssColor,
+  validateCssLength,
+  validateShadow,
+} from '../core/css-validate';
 
 /** Escape special characters to prevent attribute injection in SVG markup. */
 function escapeSvgAttr(s: string): string {
@@ -15,58 +21,6 @@ function escapeSvgAttr(s: string): string {
     .replace(/"/g, '&quot;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
-}
-
-/**
- * Validate the value of the `shadow` option of `\enclose`.
- *
- * The value is inserted in the `style` attribute of the SVG overlay as the
- * argument of a CSS `drop-shadow()` filter function. Only a strict subset of
- * the CSS grammar is accepted: two or three lengths (offset-x, offset-y and
- * an optional blur radius) and an optional color, in any order. The color may
- * be a CSS color keyword, a hex color, or an `rgb()`, `rgba()`, `hsl()` or
- * `hsla()` function whose arguments are numbers, percentages, commas and
- * slashes.
- *
- * Any other value (including one containing quotes, parentheses or
- * semicolons) is rejected and the function returns `undefined`. This prevents
- * a crafted value from breaking out of the `style` attribute or of the
- * `drop-shadow()` function. Reported in GitHub security advisory for 0.111.0
- * (shadow attribute injection in `\enclose`).
- */
-function validateShadow(value: string): string | undefined {
-  // Split on spaces, but keep the arguments of a color function (for example
-  // `rgba(0, 0, 0, .5)`) together.
-  const tokens: string[] = [];
-  let depth = 0;
-  let current = '';
-  for (const c of value.trim()) {
-    if (c === '(') depth += 1;
-    else if (c === ')') depth -= 1;
-    if (depth < 0) return undefined;
-    if (/\s/.test(c) && depth === 0) {
-      if (current) tokens.push(current);
-      current = '';
-    } else current += c;
-  }
-  if (depth !== 0) return undefined;
-  if (current) tokens.push(current);
-  if (tokens.length < 2 || tokens.length > 4) return undefined;
-
-  const length = /^-?(\d+|\d*\.\d+)(px|em|rem|ex|pt|%)?$/;
-  const color =
-    /^([a-zA-Z]+|#[0-9a-fA-F]{3,8}|(rgba?|hsla?)\([\d.,%\s/]*\))$/;
-
-  let lengthCount = 0;
-  let colorCount = 0;
-  for (const token of tokens) {
-    if (length.test(token)) lengthCount += 1;
-    else if (color.test(token)) colorCount += 1;
-    else return undefined;
-  }
-  if (lengthCount < 2 || lengthCount > 3 || colorCount > 1) return undefined;
-
-  return tokens.join(' ');
 }
 
 export type EncloseAtomOptions = {
@@ -121,7 +75,6 @@ export class EncloseAtom extends Atom {
   ) {
     super({ type: 'enclose', command, style: options.style });
     this.body = body;
-    this.backgroundcolor = options.backgroundcolor;
     if (notation.updiagonalarrow) notation.updiagonalstrike = false;
 
     if (notation.box) {
@@ -132,13 +85,24 @@ export class EncloseAtom extends Atom {
     }
 
     this.notation = notation;
+    // The option values come from the LaTeX input and are used in CSS
+    // declarations and SVG attributes. Each one is validated against a strict
+    // grammar, and replaced by a default when it is not valid, so that a
+    // crafted value cannot add CSS declarations or attributes.
     this.shadow = options.shadow ?? 'none';
-    this.strokeWidth = options.strokeWidth ?? '0.06em';
-    if (!this.strokeWidth) this.strokeWidth = '0.06em';
-    this.strokeStyle = options.strokeStyle;
+    this.strokeWidth = validateCssLength(options.strokeWidth) ?? '0.06em';
+    this.strokeStyle = /^(solid|dashed|dotted|double|none)$/.test(
+      options.strokeStyle ?? ''
+    )
+      ? options.strokeStyle
+      : 'solid';
     this.svgStrokeStyle = options.svgStrokeStyle;
-    this.strokeColor = options.strokeColor;
-    this.borderStyle = options.borderStyle;
+    this.strokeColor = validateCssColor(options.strokeColor) ?? 'currentColor';
+    this.backgroundcolor =
+      validateCssColor(options.backgroundcolor) ?? 'transparent';
+    this.borderStyle =
+      validateCssBorder(options.borderStyle) ??
+      `${this.strokeWidth} ${this.strokeStyle} ${this.strokeColor}`;
     this.padding = options.padding;
 
     this.captureSelection = false;
@@ -404,7 +368,7 @@ export class EncloseAtom extends Atom {
     if (this.backgroundcolor)
       notation.setStyle('background-color', this.backgroundcolor);
 
-    if (this.notation.box) notation.setStyle('border', '1px solid red');
+    if (this.notation.box) notation.setStyle('border', this.borderStyle);
 
     if (this.notation.actuarial) {
       notation.setStyle('border-top', this.borderStyle);

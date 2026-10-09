@@ -1,5 +1,9 @@
 import type { CreateAtomOptions } from 'core/types';
-import { EncloseAtom, EncloseAtomOptions } from '../atoms/enclose';
+import {
+  EncloseAtom,
+  EncloseAtomOptions,
+  Notations,
+} from '../atoms/enclose';
 
 import { argAtoms, defineFunction } from './definitions-utils';
 import type { Argument } from './types';
@@ -8,6 +12,26 @@ import type { Argument } from './types';
 // The first argument is a comma delimited list of notations, as defined
 // here: https://developer.mozilla.org/en-US/docs/Web/MathML/Element/menclose
 // The second, optional, specifies the style to use for the notations.
+/** The notation names accepted by `\\enclose`. */
+const NOTATION_NAMES: ReadonlySet<keyof Notations> = new Set<keyof Notations>([
+  'downdiagonalstrike',
+  'updiagonalstrike',
+  'verticalstrike',
+  'horizontalstrike',
+  'updiagonalarrow',
+  'right',
+  'bottom',
+  'left',
+  'top',
+  'circle',
+  'roundedbox',
+  'madruwb',
+  'actuarial',
+  'box',
+  'phasorangle',
+  'longdiv',
+]);
+
 /**
  * Split `s` at each occurrence of `separator` that is not inside parentheses
  * and not inside a double-quoted string. Empty items are dropped.
@@ -85,13 +109,17 @@ defineFunction('enclose', '{notation:string}[style:string]{body:auto}', {
 
     options.borderStyle = `${options.strokeWidth} ${options.strokeStyle} ${options.strokeColor}`;
 
-    // Normalize the list of notations.
-    const notation = {};
+    // Normalize the list of notations. Only known notation names are kept:
+    // the names are written into the `notation` attribute of the MathML
+    // `<menclose>` element, so an arbitrary string must not get through.
+    const notation: Notations = {};
     (args[0] ?? '')
       .split(/[, ]/)
       .filter((v) => v.length > 0)
       .forEach((x) => {
-        notation[x.toLowerCase()] = true;
+        const name = x.toLowerCase();
+        if (NOTATION_NAMES.has(name as keyof Notations))
+          notation[name as keyof Notations] = true;
       });
 
     return new EncloseAtom(
