@@ -1,3 +1,21 @@
+## [Unreleased]
+
+### Security Advisories
+
+- Fixed a cross-site scripting (XSS) vulnerability in the `shadow` option of
+  the `\enclose` command. The value of the option was written into the markup
+  of the SVG overlay as raw attribute text, outside of any quoted attribute. A
+  value containing spaces could therefore add attributes, including event
+  handlers, to the `<svg>` element, and run script when the markup was inserted
+  in the document. The issue affected `convertLatexToMarkup()`, the editor and
+  the `<math-span>` / `<math-div>` static elements. No HTML in the input was
+  needed, so input-side HTML sanitizers did not catch it. The value is now
+  validated against a strict grammar (two or three CSS lengths and an optional
+  color) and emitted inside the quoted `style` attribute. Invalid values are
+  ignored. As a side effect, the `shadow` option, which never had any visible
+  effect, now works. This is the same class of issue as GHSA-qwj6-q94f-8425 and
+  GHSA-fm7p-gw32-828p.
+
 ## 0.111.0 _2026-09-30_
 
 ### Breaking Changes

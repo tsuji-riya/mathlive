@@ -17,6 +17,58 @@ function escapeSvgAttr(s: string): string {
     .replace(/>/g, '&gt;');
 }
 
+/**
+ * Validate the value of the `shadow` option of `\enclose`.
+ *
+ * The value is inserted in the `style` attribute of the SVG overlay as the
+ * argument of a CSS `drop-shadow()` filter function. Only a strict subset of
+ * the CSS grammar is accepted: two or three lengths (offset-x, offset-y and
+ * an optional blur radius) and an optional color, in any order. The color may
+ * be a CSS color keyword, a hex color, or an `rgb()`, `rgba()`, `hsl()` or
+ * `hsla()` function whose arguments are numbers, percentages, commas and
+ * slashes.
+ *
+ * Any other value (including one containing quotes, parentheses or
+ * semicolons) is rejected and the function returns `undefined`. This prevents
+ * a crafted value from breaking out of the `style` attribute or of the
+ * `drop-shadow()` function. Reported in GitHub security advisory for 0.111.0
+ * (shadow attribute injection in `\enclose`).
+ */
+function validateShadow(value: string): string | undefined {
+  // Split on spaces, but keep the arguments of a color function (for example
+  // `rgba(0, 0, 0, .5)`) together.
+  const tokens: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const c of value.trim()) {
+    if (c === '(') depth += 1;
+    else if (c === ')') depth -= 1;
+    if (depth < 0) return undefined;
+    if (/\s/.test(c) && depth === 0) {
+      if (current) tokens.push(current);
+      current = '';
+    } else current += c;
+  }
+  if (depth !== 0) return undefined;
+  if (current) tokens.push(current);
+  if (tokens.length < 2 || tokens.length > 4) return undefined;
+
+  const length = /^-?(\d+|\d*\.\d+)(px|em|rem|ex|pt|%)?$/;
+  const color =
+    /^([a-zA-Z]+|#[0-9a-fA-F]{3,8}|(rgba?|hsla?)\([\d.,%\s/]*\))$/;
+
+  let lengthCount = 0;
+  let colorCount = 0;
+  for (const token of tokens) {
+    if (length.test(token)) lengthCount += 1;
+    else if (color.test(token)) colorCount += 1;
+    else return undefined;
+  }
+  if (lengthCount < 2 || lengthCount > 3 || colorCount > 1) return undefined;
+
+  return tokens.join(' ');
+}
+
 export type EncloseAtomOptions = {
   shadow?: string;
   strokeWidth?: string;
@@ -385,15 +437,20 @@ export class EncloseAtom extends Atom {
       notation.setStyle('border-bottom', this.borderStyle);
 
     if (svg) {
-      let svgStyle = '';
+      // The shadow is a CSS declaration. It is placed inside the quoted
+      // `style` attribute of the SVG overlay (see `Box.toMarkup()`), never
+      // emitted as raw attribute text. The value is validated against a strict
+      // grammar first, so a crafted value cannot inject attributes.
       if (this.shadow === 'auto') {
-        svgStyle +=
-          'filter: drop-shadow(0 0 .5px rgba(255, 255, 255, .7)) drop-shadow(1px 1px 2px #333)';
+        notation.svgFilter =
+          'drop-shadow(0 0 .5px rgba(255, 255, 255, .7)) drop-shadow(1px 1px 2px #333)';
+      } else if (this.shadow && this.shadow !== 'none') {
+        const shadow = validateShadow(this.shadow);
+        if (shadow) notation.svgFilter = `drop-shadow(${shadow})`;
       }
-      if (this.shadow !== 'none')
-        svgStyle += `filter: drop-shadow(${escapeSvgAttr(this.shadow ?? '')})`;
 
-      svgStyle += ` stroke-width="${escapeSvgAttr(this.strokeWidth ?? '')}" stroke="${escapeSvgAttr(this.strokeColor ?? '')}"`;
+      // `svgStyle` contains only quoted SVG presentation attributes.
+      let svgStyle = ` stroke-width="${escapeSvgAttr(this.strokeWidth ?? '')}" stroke="${escapeSvgAttr(this.strokeColor ?? '')}"`;
       svgStyle += ' stroke-linecap="round"';
       if (this.svgStrokeStyle)
         svgStyle += ` stroke-dasharray="${escapeSvgAttr(this.svgStrokeStyle)}"`;

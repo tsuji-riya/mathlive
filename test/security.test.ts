@@ -92,3 +92,55 @@ test('Secure Content', () => {
     '<span class="ML__latex"><span class="ML__strut" style="height:0.44em"></span><span class="ML__base"><span data-onerror="alert(1)"><span class="ML__mathit">x</span></span></span></span>'
   );
 });
+
+//
+// The `shadow` option of `\enclose` is placed inside the `style` attribute of
+// the SVG overlay. A value with spaces or quotes must not be able to add
+// attributes (such as an event handler) to the `<svg>` element.
+//
+test('Enclose shadow attribute injection', () => {
+  const payload = String.raw`\enclose{horizontalstrike}[shadow="0) onload=window.pwned=1//"]{x}`;
+  const markup = convertLatexToMarkup(payload);
+  expect(markup).not.toMatch(/onload/);
+  expect(markup).not.toMatch(/pwned/);
+  // Nothing is emitted between the closing quote of `style` and the next
+  // quoted attribute.
+  expect(markup).toMatch(/<svg style="[^"]*" stroke-width="/);
+
+  // A valid shadow is emitted inside the quoted `style` attribute.
+  expect(
+    convertLatexToMarkup(
+      String.raw`\enclose{horizontalstrike}[shadow="1px 1px 2px red"]{x}`
+    )
+  ).toMatch(/<svg style="[^"]*filter:drop-shadow\(1px 1px 2px red\);" stroke-width="/);
+
+  expect(
+    convertLatexToMarkup(
+      String.raw`\enclose{horizontalstrike}[shadow="1px 1px rgba(0, 0, 0, .5)"]{x}`
+    )
+  ).toMatch(/filter:drop-shadow\(1px 1px rgba\(0, 0, 0, .5\)\);" stroke-width="/);
+
+  // `auto` uses the built-in preset and nothing else.
+  const auto = convertLatexToMarkup(
+    String.raw`\enclose{horizontalstrike}[shadow="auto"]{x}`
+  );
+  expect(auto).toMatch(/<svg style="[^"]*filter:drop-shadow\(0 0 .5px rgba\(255, 255, 255, .7\)\) drop-shadow\(1px 1px 2px #333\);" stroke-width="/);
+  expect(auto).not.toMatch(/drop-shadow\(auto\)/);
+
+  // Invalid shadows are dropped entirely.
+  for (const bad of [
+    'url(x)',
+    '1px 1px red; background:url(x)',
+    '1px',
+    '1px 1px 1px 1px red',
+    '1px 1px "red"',
+    '1px 1px expression(1)',
+    '1px 1px rgb(a) b',
+  ]) {
+    const m = convertLatexToMarkup(
+      String.raw`\enclose{horizontalstrike}[shadow="` + bad + '"]{x}'
+    );
+    expect(m).not.toMatch(/filter:/);
+    expect(m).toMatch(/<svg style="[^"]*" stroke-width="/);
+  }
+});

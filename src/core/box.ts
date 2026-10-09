@@ -131,7 +131,17 @@ export class Box implements BoxInterface {
 
   svgBody?: string;
   svgOverlay?: string;
+  /**
+   * Additional attributes for the `<svg>` overlay element. Must be a string
+   * of `name="value"` pairs with escaped values. Never place CSS declarations
+   * here: use `svgFilter` instead.
+   */
   svgStyle?: string;
+  /**
+   * Value of the CSS `filter` property applied to the `<svg>` overlay. It is
+   * emitted inside the quoted `style` attribute of the element.
+   */
+  svgFilter?: string;
 
   id?: string;
 
@@ -391,6 +401,12 @@ export class Box implements BoxInterface {
       } else svgMarkup += 'top:0;left:0;width:100%;';
 
       svgMarkup += 'z-index:2;';
+      // The filter value is validated by the caller (see `validateShadow()`
+      // in `src/atoms/enclose.ts`). Escaping the quote characters guarantees
+      // that it cannot close the `style` attribute even if that validation
+      // is bypassed.
+      if (this.svgFilter)
+        svgMarkup += `filter:${this.svgFilter.replace(/["&<>]/g, (c) => `&#${c.charCodeAt(0)};`)};`;
       svgMarkup += '"';
 
       if (this.svgStyle) svgMarkup += this.svgStyle;

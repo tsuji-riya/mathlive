@@ -8,6 +8,28 @@ import type { Argument } from './types';
 // The first argument is a comma delimited list of notations, as defined
 // here: https://developer.mozilla.org/en-US/docs/Web/MathML/Element/menclose
 // The second, optional, specifies the style to use for the notations.
+/**
+ * Split `s` at each occurrence of `separator` that is not inside parentheses
+ * and not inside a double-quoted string. Empty items are dropped.
+ */
+export function splitTopLevel(s: string, separator: string): string[] {
+  const result: string[] = [];
+  let depth = 0;
+  let inQuote = false;
+  let current = '';
+  for (const c of s) {
+    if (c === '"') inQuote = !inQuote;
+    else if (!inQuote && c === '(') depth += 1;
+    else if (!inQuote && c === ')') depth = Math.max(0, depth - 1);
+    if (c === separator && depth === 0 && !inQuote) {
+      if (current.length > 0) result.push(current);
+      current = '';
+    } else current += c;
+  }
+  if (current.length > 0) result.push(current);
+  return result;
+}
+
 defineFunction('enclose', '{notation:string}[style:string]{body:auto}', {
   createAtom: (
     atomOptions: CreateAtomOptions<
@@ -30,24 +52,29 @@ defineFunction('enclose', '{notation:string}[style:string]{body:auto}', {
     // Extract info from style string
     if (args[1]) {
       // Split the string by comma delimited sub-strings, ignoring commas
-      // that may be inside (). For example"x, rgb(a, b, c)" would return
-      // ['x', 'rgb(a, b, c)']
-      const styles = args[1].split(/,(?![^(]*\)(?:(?:[^(]*\)){2})*[^"]*$)/);
+      // that are inside parentheses or inside double quotes. For example
+      // `x, rgb(a, b, c), shadow="1px 1px rgba(0, 0, 0, .5)"` returns
+      // `['x', 'rgb(a, b, c)', 'shadow="1px 1px rgba(0, 0, 0, .5)"']`.
+      const styles = splitTopLevel(args[1], ',');
       for (const s of styles) {
-        const shorthand = s.match(/\s*(\S+)\s+(\S+)\s+(.*)/);
-        if (shorthand) {
-          options.strokeWidth = shorthand[1];
-          options.strokeStyle = shorthand[2];
-          options.strokeColor = shorthand[3];
+        // Try the `name="value"` form first. The value may contain spaces
+        // (for example `shadow="1px 1px red"`), so it must be checked before
+        // the `width style color` border shorthand, which also matches
+        // space-separated tokens.
+        const attribute = s.match(/^\s*([a-z]*)\s*=\s*"(.*)"\s*$/);
+        if (attribute) {
+          if (attribute[1] === 'mathbackground')
+            options.backgroundcolor = attribute[2];
+          else if (attribute[1] === 'mathcolor')
+            options.strokeColor = attribute[2];
+          else if (attribute[1] === 'padding') options.padding = attribute[2];
+          else if (attribute[1] === 'shadow') options.shadow = attribute[2];
         } else {
-          const attribute = s.match(/\s*([a-z]*)\s*=\s*"(.*)"/);
-          if (attribute) {
-            if (attribute[1] === 'mathbackground')
-              options.backgroundcolor = attribute[2];
-            else if (attribute[1] === 'mathcolor')
-              options.strokeColor = attribute[2];
-            else if (attribute[1] === 'padding') options.padding = attribute[2];
-            else if (attribute[1] === 'shadow') options.shadow = attribute[2];
+          const shorthand = s.match(/\s*(\S+)\s+(\S+)\s+(.*)/);
+          if (shorthand) {
+            options.strokeWidth = shorthand[1];
+            options.strokeStyle = shorthand[2];
+            options.strokeColor = shorthand[3];
           }
         }
       }
